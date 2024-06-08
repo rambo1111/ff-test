@@ -57,7 +57,7 @@ def process_pdf_background(pdf_path, subject, model):
     response = handle_pdf(pdf_path, subject, model)
 
 @app.post("/process-file/")
-async def process_file(file: UploadFile = File(...), subject: str = Form(...), background_tasks: BackgroundTasks):
+async def process_file(file: UploadFile = File(...), subject: str = Form(...), background_tasks: BackgroundTasks = BackgroundTasks()):
     # Create a temporary directory
     with tempfile.TemporaryDirectory() as tmpdirname:
         # Save the uploaded file to the temporary directory
