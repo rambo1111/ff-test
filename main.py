@@ -1,19 +1,11 @@
-from fastapi import FastAPI, File, UploadFile, Form, HTTPException
+from fastapi import FastAPI, File, UploadFile, Form, HTTPException, BackgroundTasks
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-import PyPDF2
+import pdfplumber
 import google.generativeai as genai
 import tempfile
 import os
-from reportlab.lib.pagesizes import letter
-from reportlab.pdfgen import canvas
-from PIL import Image
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
-import logging
-
-# Set up logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
@@ -27,14 +19,13 @@ app.add_middleware(
 )
 
 # Configure Google Generative AI
-GOOGLE_API_KEY = 'AIzaSyCAzjRDfy9rbkP4v8CWCi9_vWaypLPY15c'
+GOOGLE_API_KEY = 'your_google_api_key'
 genai.configure(api_key=GOOGLE_API_KEY)
 
 def extract_text_from_pdf(pdf_path):
     text = ""
-    with open(pdf_path, "rb") as f:
-        reader = PyPDF2.PdfReader(f)
-        for page in reader.pages:
+    with pdfplumber.open(pdf_path) as pdf:
+        for page in pdf.pages:
             text += page.extract_text()
     return text
 
@@ -42,7 +33,11 @@ def handle_pdf(pdf_path, subject, model):
     extracted_text = extract_text_from_pdf(pdf_path)
 
     response = model.generate_content(
-        [f'I have extracted text from a pdf, which is my {subject} assignment. Please answer these questions:{extracted_text}'],
+        [f'''I have extracted text from a pdf, which is my {subject} assignment. Please answer these questions:{extracted_text}.
+         NOTE: 1. Start every answer with Ans1-, next with Ans2- and so on.
+               2. Don't use any markdown, just give answer in normal text without any markdown symbols.
+               3. You can use a line break for next line.
+               4. Also wr'''],
         safety_settings={
             HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
             HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
@@ -53,41 +48,16 @@ def handle_pdf(pdf_path, subject, model):
     
     return response.text
 
-def convert_image_to_pdf(image_path, pdf_path):
-    # Open the image using Pillow
-    img = Image.open(image_path)
-
-    # Create a PDF canvas using ReportLab
-    pdf_canvas = canvas.Canvas(pdf_path, pagesize=letter)
-
-    # Get the dimensions of the image
-    img_width, img_height = img.size
-
-    # Calculate the aspect ratio to maintain the image's proportions
-    aspect_ratio = img_height / float(img_width)
-
-    # Add the image to the PDF
-    pdf_canvas.drawImage(image_path, 0, 0, width=letter[0], height=letter[0]*aspect_ratio)
-
-    # Save the PDF
-    pdf_canvas.save()
-
-def handle_image(image_path, subject, model):
-    # Create a temporary directory to store the PDF
-    with tempfile.TemporaryDirectory() as tmpdirname:
-        # Generate a temporary PDF file path
-        pdf_path = os.path.join(tmpdirname, "temp.pdf")
-        
-        # Convert the image to PDF
-        convert_image_to_pdf(image_path, pdf_path)
-        
-        # Process the PDF using the existing function
-        response = handle_pdf(pdf_path, subject, model)
+def process_pdf_background(pdf_path, subject, model):
+    # Check if the file path has a ".pdf" extension
+    while not pdf_path.lower().endswith(".pdf"):
+        print("File is not present")
     
-    return response
+    # Proceed with processing the PDF
+    response = handle_pdf(pdf_path, subject, model)
 
 @app.post("/process-file/")
-async def process_file(file: UploadFile = File(...), subject: str = Form(...)):
+async def process_file(file: UploadFile = File(...), subject: str = Form(...), background_tasks: BackgroundTasks):
     # Create a temporary directory
     with tempfile.TemporaryDirectory() as tmpdirname:
         # Save the uploaded file to the temporary directory
@@ -101,19 +71,17 @@ async def process_file(file: UploadFile = File(...), subject: str = Form(...)):
         try:
             # Determine file type and process accordingly
             if file.filename.lower().endswith(".pdf"):
-                response = handle_pdf(file_path, subject, model)
-            elif file.filename.lower().endswith((".jpg", ".jpeg", ".png")):
-                response = handle_image(file_path, subject, model)
+                # Add the background task to process the PDF
+                background_tasks.add_task(process_pdf_background, file_path, subject, model)
+                response = "Processing PDF in background"
+            elif file.filename.lower().endswith((".jpg", ".jpeg", ".png", ".docx", ".doc")):
+                response = "WE ARE UNDER DEVELOPMENT"
             else:
                 raise ValueError("Unsupported file type. Please provide a PDF or image file.")
         except Exception as e:
             raise HTTPException(status_code=400, detail=str(e))
 
     return JSONResponse(content={"response": response})
-
-@app.get("/healthz")
-async def health_check():
-    return {"status": "ok"}
 
 if __name__ == "__main__":
     import uvicorn
