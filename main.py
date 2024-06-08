@@ -15,8 +15,6 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-pytesseract.pytesseract.tesseract_cmd = 'Tesseract-OCR\\tesseract.exe'
-
 app = FastAPI()
 
 # Configure CORS to allow all origins
