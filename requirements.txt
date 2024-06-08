@@ -1,7 +1,5 @@
 fastapi
 uvicorn
-PyPDF2
+pdfplumber
 google-generativeai
-reportlab
-Pillow
 gunicorn
