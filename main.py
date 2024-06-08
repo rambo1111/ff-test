@@ -1,4 +1,4 @@
-from fastapi import FastAPI, File, UploadFile, Form, HTTPException, BackgroundTasks
+from fastapi import FastAPI, File, UploadFile, Form, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import pdfplumber
@@ -6,6 +6,7 @@ import google.generativeai as genai
 import tempfile
 import os
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
+
 
 app = FastAPI()
 
@@ -36,7 +37,8 @@ def handle_pdf(pdf_path, subject, model):
         [f'''I have extracted text from a pdf, which is my {subject} assignment. Please answer these questions:{extracted_text}.
          NOTE: 1. Start every answer with Ans1-, next with Ans2- and so on.
                2. Don't use any markdown, just give answer in normal text without any markdown symbols.
-               3. You can use a line break for next line.'''],
+               3. You can use a line break for next line.
+               4. Also write  the questions before answering them.'''],
         safety_settings={
             HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
             HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
@@ -47,29 +49,17 @@ def handle_pdf(pdf_path, subject, model):
     
     return response.text
 
-def process_background(pdf_path):
-    # Check if the file path has a ".pdf" extension
-    while not pdf_path.lower().endswith(".pdf"):
-        print("File is not present")
-
-
 @app.post("/process-file/")
-async def process_file(file: UploadFile = File(...), subject: str = Form(...), background_tasks: BackgroundTasks = BackgroundTasks()):
-    
-    async def process_background(pdf_path):
-        # Check if the file path has a ".pdf" extension
-        while not pdf_path.lower().endswith(".pdf"):
-            print("File is not present")
-
-    # Add the background task
-    background_tasks.add_task(process_background, file.filename)
-
+async def process_file(file: UploadFile = File(...), subject: str = Form(...)):
     # Create a temporary directory
     with tempfile.TemporaryDirectory() as tmpdirname:
         # Save the uploaded file to the temporary directory
         file_path = os.path.join(tmpdirname, file.filename)
         with open(file_path, "wb") as f:
             f.write(await file.read())
+
+    if not file:
+        print("jaldi kuch upload karo warna shutdown ho jaunga")
 
         # Initialize the Generative AI model
         model = genai.GenerativeModel(model_name="gemini-pro")
