@@ -49,17 +49,20 @@ def handle_pdf(pdf_path, subject, model):
     
     return response.text
 
+@app.get("/keep-alive")
+async def keep_alive():
+    return JSONResponse(content={"message": "Server is active"})
+
 @app.post("/process-file/")
 async def process_file(file: UploadFile = File(...), subject: str = Form(...)):
+
+
     # Create a temporary directory
     with tempfile.TemporaryDirectory() as tmpdirname:
         # Save the uploaded file to the temporary directory
         file_path = os.path.join(tmpdirname, file.filename)
         with open(file_path, "wb") as f:
             f.write(await file.read())
-
-    if not file:
-        print("jaldi kuch upload karo warna shutdown ho jaunga")
 
         # Initialize the Generative AI model
         model = genai.GenerativeModel(model_name="gemini-pro")
@@ -74,7 +77,8 @@ async def process_file(file: UploadFile = File(...), subject: str = Form(...)):
                 raise ValueError("Unsupported file type. Please provide a PDF or image file.")
         except Exception as e:
             raise HTTPException(status_code=400, detail=str(e))
-
+    
+    
     return JSONResponse(content={"response": response})
 
 if __name__ == "__main__":
