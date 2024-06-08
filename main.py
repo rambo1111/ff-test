@@ -5,7 +5,8 @@ import PyPDF2
 import google.generativeai as genai
 import tempfile
 import os
-import pytesseract
+from reportlab.lib.pagesizes import letter
+from reportlab.pdfgen import canvas
 from PIL import Image
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
 import logging
@@ -54,25 +55,38 @@ def handle_pdf(pdf_path, subject, model):
     
     return response.text
 
-def extract_text_from_img(image_path):
-    image = Image.open(image_path)
-    text = pytesseract.image_to_string(image)
-    return text
+def convert_image_to_pdf(image_path, pdf_path):
+    # Open the image using Pillow
+    img = Image.open(image_path)
+
+    # Create a PDF canvas using ReportLab
+    pdf_canvas = canvas.Canvas(pdf_path, pagesize=letter)
+
+    # Get the dimensions of the image
+    img_width, img_height = img.size
+
+    # Calculate the aspect ratio to maintain the image's proportions
+    aspect_ratio = img_height / float(img_width)
+
+    # Add the image to the PDF
+    pdf_canvas.drawImage(image_path, 0, 0, width=letter[0], height=letter[0]*aspect_ratio)
+
+    # Save the PDF
+    pdf_canvas.save()
 
 def handle_image(image_path, subject, model):
-    extracted_text = extract_text_from_img(image_path)
-
-    response = model.generate_content(
-        [f'I have extracted text from an image, which is my {subject} assignment. Please answer these questions:{extracted_text}'],
-        safety_settings={
-            HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
-            HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
-            HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
-            HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE
-        }
-    )
+    # Create a temporary directory to store the PDF
+    with tempfile.TemporaryDirectory() as tmpdirname:
+        # Generate a temporary PDF file path
+        pdf_path = os.path.join(tmpdirname, "temp.pdf")
+        
+        # Convert the image to PDF
+        convert_image_to_pdf(image_path, pdf_path)
+        
+        # Process the PDF using the existing function
+        response = handle_pdf(pdf_path, subject, model)
     
-    return response.text
+    return response
 
 @app.post("/process-file/")
 async def process_file(file: UploadFile = File(...), subject: str = Form(...)):
