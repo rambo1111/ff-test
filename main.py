@@ -36,8 +36,7 @@ def handle_pdf(pdf_path, subject, model):
         [f'''I have extracted text from a pdf, which is my {subject} assignment. Please answer these questions:{extracted_text}.
          NOTE: 1. Start every answer with Ans1-, next with Ans2- and so on.
                2. Don't use any markdown, just give answer in normal text without any markdown symbols.
-               3. You can use a line break for next line.
-               4. Also wr'''],
+               3. You can use a line break for next line.'''],
         safety_settings={
             HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
             HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
@@ -54,12 +53,17 @@ def process_background(pdf_path):
         print("File is not present")
 
 
-@app.get("")
-background_tasks.add_task(process_background)
-
 @app.post("/process-file/")
-async def process_file(file: UploadFile = File(...), subject: str = Form(...)):
+async def process_file(file: UploadFile = File(...), subject: str = Form(...), background_tasks: BackgroundTasks = BackgroundTasks()):
     
+    async def process_background(pdf_path):
+        # Check if the file path has a ".pdf" extension
+        while not pdf_path.lower().endswith(".pdf"):
+            print("File is not present")
+
+    # Add the background task
+    background_tasks.add_task(process_background, file.filename)
+
     # Create a temporary directory
     with tempfile.TemporaryDirectory() as tmpdirname:
         # Save the uploaded file to the temporary directory
