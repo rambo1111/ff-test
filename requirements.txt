@@ -2,6 +2,6 @@ fastapi
 uvicorn
 PyPDF2
 google-generativeai
-pytesseract
+reportlab
 Pillow
 gunicorn
