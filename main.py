@@ -80,7 +80,7 @@ async def process_file(file: UploadFile = File(...), subject: str = Form(...)):
             f.write(await file.read())
 
         # Initialize the Generative AI model
-        model = genai.GenerativeModel(model_name="gemini-pro")
+        model = genai.GenerativeModel(model_name="gemini-1.5-flash")
 
         try:
             # Determine file type and process accordingly
