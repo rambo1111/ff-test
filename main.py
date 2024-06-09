@@ -8,6 +8,7 @@ import os
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
 import requests
 import time
+import uvicorn
 
 app = FastAPI()
 
