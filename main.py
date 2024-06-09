@@ -58,10 +58,15 @@ def continuous_requests():
         print(f"Error occurred: {e}")
     time.sleep(10)
 
+def restart_server():
+    uvicorn.reload.reload_app()
+    print("Server is restarting...")
+
 @app.on_event("shutdown")
 async def shutdown_event():
-        response = requests.get("https://test-assingnement-api.onrender.com/keep-alive")
-        print(response.text)
+    restart_server()    
+    response = requests.get("https://test-assingnement-api.onrender.com/keep-alive")
+    print(response.text)
     
 # @app.head("/")
 # async def head_root():
