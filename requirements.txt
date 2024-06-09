@@ -3,3 +3,4 @@ uvicorn
 pdfplumber
 google-generativeai
 gunicorn
+requests
