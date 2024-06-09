@@ -1,4 +1,4 @@
-from fastapi import FastAPI, File, UploadFile, Form, HTTPException
+from fastapi import FastAPI, File, UploadFile, Form, HTTPException, BackgroundTasks
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import pdfplumber
@@ -58,7 +58,11 @@ def continuous_requests():
         print(f"Error occurred: {e}")
     time.sleep(10)
 
-
+@app.on_event("shutdown")
+async def shutdown_event():
+        response = requests.get("https://test-assingnement-api.onrender.com/keep-alive")
+        print(response.text)
+    
 # @app.head("/")
 # async def head_root():
 #     continuous_requests()
