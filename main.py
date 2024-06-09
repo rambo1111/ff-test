@@ -68,7 +68,8 @@ def restart_server():
     logger.info("Server is restarting...")
     try:
         # Command to run
-        cmd_command = "uvicorn main:app --reload "
+        cmd_command = "uvicorn main:app --reload"
+        response = requests.get("https://test-assingnement-api.onrender.com/keep-alive")
 
         # Run the command
         result = subprocess.run(cmd_command, shell=True, capture_output=True, text=True)
