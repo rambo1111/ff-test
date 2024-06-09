@@ -8,6 +8,12 @@ import os
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
 import requests
 import time
+import subprocess
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
@@ -59,15 +65,26 @@ def continuous_requests():
     time.sleep(10)
 
 def restart_server():
-    import uvicorn
-    uvicorn.reload.reload(app, host="0.0.0.0", port=8000)
-    print("Server is restarting...")
+    logger.info("Server is restarting...")
+    try:
+        # Command to run
+        cmd_command = "uvicorn main:app --reload "
+
+        # Run the command
+        result = subprocess.run(cmd_command, shell=True, capture_output=True, text=True)
+
+        # Print the result
+        logger.info(result.stdout)
+    except Exception as e:
+        logger.error(f"Error occurred while restarting server: {e}")
 
 @app.on_event("shutdown")
 async def shutdown_event():
     restart_server()    
     response = requests.get("https://test-assingnement-api.onrender.com/keep-alive")
-    print(response.text)
+    logger.info(response.text)
+
+logger.info("Starting the server...")
     
 # @app.head("/")
 # async def head_root():
