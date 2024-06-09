@@ -6,7 +6,8 @@ import google.generativeai as genai
 import tempfile
 import os
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
-
+import requests
+import time
 
 app = FastAPI()
 
@@ -49,13 +50,27 @@ def handle_pdf(pdf_path, subject, model):
     
     return response.text
 
+def continuous_requests():
+    try:
+        response = requests.get("https://test-assingnement-api.onrender.com/keep-alive")
+        print(response.text)
+    except Exception as e:
+        print(f"Error occurred: {e}")
+    # time.sleep(2)
+
+
+@app.head("/")
+async def head_root():
+    continuous_requests()
+    return JSONResponse(content={"message": "Continuous requests completed."})
+
+
 @app.get("/keep-alive")
 async def keep_alive():
     return JSONResponse(content={"message": "Server is active"})
 
 @app.post("/process-file/")
 async def process_file(file: UploadFile = File(...), subject: str = Form(...)):
-
 
     # Create a temporary directory
     with tempfile.TemporaryDirectory() as tmpdirname:
