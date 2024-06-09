@@ -8,7 +8,6 @@ import os
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
 import requests
 import time
-import uvicorn
 
 app = FastAPI()
 
@@ -60,7 +59,8 @@ def continuous_requests():
     time.sleep(10)
 
 def restart_server():
-    uvicorn.reload.reload_app()
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
     print("Server is restarting...")
 
 @app.on_event("shutdown")
