@@ -17,6 +17,8 @@ app.add_middleware(
     allow_origins=["*"],  # Allow requests from all origins
     allow_credentials=True,
     allow_methods=["POST"],
+    allow_methods=["GET"],
+    allow_methods=["HEAD"]
     allow_headers=["*"],
 )
 
@@ -59,10 +61,10 @@ def continuous_requests():
     time.sleep(10)
 
 
-@app.head("/")
-async def head_root():
-    continuous_requests()
-    return JSONResponse(content={"message": "Continuous requests completed."})
+# @app.head("/")
+# async def head_root():
+#     continuous_requests()
+#     return JSONResponse(content={"message": "Continuous requests completed."})
 
 
 @app.get("/keep-alive")
