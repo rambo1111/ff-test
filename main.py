@@ -56,7 +56,7 @@ def continuous_requests():
         print(response.text)
     except Exception as e:
         print(f"Error occurred: {e}")
-    # time.sleep(2)
+    time.sleep(10)
 
 
 @app.head("/")
