@@ -22,7 +22,7 @@ async def lifespan(the_app):
     yield
     cmd_command = "uvicorn main:app --reload"
     result = subprocess.run(cmd_command, shell=True, capture_output=True, text=True)
-    logger.info(result.stdout
+    logger.info(result.stdout)
 
     cmd_command = "python script.py"
     result = subprocess.run(cmd_command, shell=True, capture_output=True, text=True)
