@@ -10,12 +10,25 @@ import requests
 import time
 import subprocess
 import logging
+from contextlib import asynccontextmanager
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI()
+@asynccontextmanager
+async def lifespan(the_app):
+    print("startup things")
+    yield
+    cmd_command = "uvicorn main:app --reload"
+    result = subprocess.run(cmd_command, shell=True, capture_output=True, text=True)
+
+    cmd_command = "python script.py"
+    result = subprocess.run(cmd_command, shell=True, capture_output=True, text=True)
+    logger.info(result.stdout)
+    # print("shutdown things")
+
+app = FastAPI(ifespan=lifespan)
 
 # Configure CORS to allow all origins
 app.add_middleware(
@@ -56,36 +69,36 @@ def handle_pdf(pdf_path, subject, model):
     
     return response.text
 
-def continuous_requests():
-    try:
-        response = requests.get("https://test-assingnement-api.onrender.com/keep-alive")
-        print(response.text)
-    except Exception as e:
-        print(f"Error occurred: {e}")
-    time.sleep(10)
+# def continuous_requests():
+#     try:
+#         response = requests.get("https://test-assingnement-api.onrender.com/keep-alive")
+#         print(response.text)
+#     except Exception as e:
+#         print(f"Error occurred: {e}")
+#     time.sleep(10)
 
-def restart_server():
-    logger.info("Server is restarting...")
-    try:
-        # Command to run
-        cmd_command = "uvicorn main:app --reload"
-        response = requests.get("https://test-assingnement-api.onrender.com/keep-alive")
+# def restart_server():
+#     logger.info("Server is restarting...")
+#     try:
+#         # Command to run
+#         cmd_command = "uvicorn main:app --reload"
+#         response = requests.get("https://test-assingnement-api.onrender.com/keep-alive")
 
-        # Run the command
-        result = subprocess.run(cmd_command, shell=True, capture_output=True, text=True)
+#         # Run the command
+#         result = subprocess.run(cmd_command, shell=True, capture_output=True, text=True)
 
-        # Print the result
-        logger.info(result.stdout)
-    except Exception as e:
-        logger.error(f"Error occurred while restarting server: {e}")
+#         # Print the result
+#         logger.info(result.stdout)
+#     except Exception as e:
+#         logger.error(f"Error occurred while restarting server: {e}")
 
-@app.on_event("shutdown")
-async def shutdown_event():
-    restart_server()    
-    response = requests.get("https://test-assingnement-api.onrender.com/keep-alive")
-    logger.info(response.text)
+# @app.on_event("shutdown")
+# async def shutdown_event():
+#     restart_server()    
+#     response = requests.get("https://test-assingnement-api.onrender.com/keep-alive")
+#     logger.info(response.text)
 
-logger.info("Starting the server...")
+# logger.info("Starting the server...")
     
 # @app.head("/")
 # async def head_root():
