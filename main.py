@@ -28,7 +28,7 @@ async def lifespan(the_app):
     logger.info(result.stdout)
     # print("shutdown things")
 
-app = FastAPI(ifespan=lifespan)
+app = FastAPI(lifespan=lifespan)
 
 # Configure CORS to allow all origins
 app.add_middleware(
