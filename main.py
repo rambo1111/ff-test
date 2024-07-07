@@ -1,143 +1,150 @@
-from fastapi import FastAPI, File, UploadFile, Form, HTTPException, BackgroundTasks
-from fastapi.responses import JSONResponse
-from fastapi.middleware.cors import CORSMiddleware
-import pdfplumber
-import google.generativeai as genai
-import tempfile
 import os
-from google.generativeai.types import HarmCategory, HarmBlockThreshold
-import requests
-import time
-import subprocess
-import logging
-from contextlib import asynccontextmanager
+import base64
+import atexit
+import cv2
+import numpy as np
+from flask import Flask, render_template, request, jsonify, send_file
+from PIL import Image
+from potrace import Bitmap, POTRACE_TURNPOLICY_MINORITY
+import fontforge
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+app = Flask(__name__)
+CAPTURED_FRAMES_FOLDER = 'captured_frames'
+PROCESSED_FRAMES_FOLDER = 'processed_frames'
+SVG_FOLDER = 'svgs'
+TTF_PATH = 'myfont.ttf'
+os.makedirs(CAPTURED_FRAMES_FOLDER, exist_ok=True)
+os.makedirs(PROCESSED_FRAMES_FOLDER, exist_ok=True)
+os.makedirs(SVG_FOLDER, exist_ok=True)
 
-@asynccontextmanager
-async def lifespan(the_app):
-    print("startup things")
-    yield
-    cmd_command = "uvicorn main:app --reload"
-    result = subprocess.run(cmd_command, shell=True, capture_output=True, text=True)
-    logger.info(result.stdout)
+def cleanup_on_exit():
+    try:
+        deleted_files = []
+        for folder in [CAPTURED_FRAMES_FOLDER, PROCESSED_FRAMES_FOLDER, SVG_FOLDER]:
+            files = os.listdir(folder)
+            for file in files:
+                file_path = os.path.join(folder, file)
+                if os.path.isfile(file_path):
+                    os.remove(file_path)
+                    deleted_files.append(file)
+        if os.path.isfile(TTF_PATH):
+            os.remove(TTF_PATH)
+            deleted_files.append(TTF_PATH)
+        print(f"Cleanup completed. Deleted files: {deleted_files}")
+    except Exception as e:
+        print(f"Error during cleanup: {str(e)}")
 
-    cmd_command = "python script.py"
-    result = subprocess.run(cmd_command, shell=True, capture_output=True, text=True)
-    logger.info(result.stdout)
-    # print("shutdown things")
+atexit.register(cleanup_on_exit)
 
-app = FastAPI(lifespan=lifespan)
+def enhance_contrast_brightness_dilate(image_path, output_path, kernel_size=(3, 3)):
+    img = cv2.imread(image_path)
+    alpha = 1.5
+    beta = 10
+    adjusted = np.clip(alpha * img + beta, 0, 255).astype(np.uint8)
+    kernel = np.ones(kernel_size, dtype=np.uint8)
+    dilated = cv2.erode(adjusted, kernel, iterations=1)
+    cv2.imwrite(output_path, dilated)
 
-# Configure CORS to allow all origins
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # Allow requests from all origins
-    allow_credentials=True,
-    allow_methods=["POST", "GET", "HEAD"],
-    allow_headers=["*"],
-)
+def file_to_svg(input_path, output_path):
+    image = Image.open(input_path).convert('L')
+    bm = Bitmap(image, blacklevel=0.5)
+    plist = bm.trace(turdsize=2, turnpolicy=POTRACE_TURNPOLICY_MINORITY, alphamax=1, opticurve=False, opttolerance=0.2)
+    with open(output_path, "w") as fp:
+        fp.write(f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {image.width} {image.height}">')
+        parts = []
+        for curve in plist:
+            fs = curve.start_point
+            parts.append(f"M{fs.x},{fs.y}")
+            for segment in curve.segments:
+                if segment.is_corner:
+                    a, b = segment.c, segment.end_point
+                    parts.append(f"L{a.x},{a.y}L{b.x},{b.y}")
+                else:
+                    a, b, c = segment.c1, segment.c2, segment.end_point
+                    parts.append(f"C{a.x},{a.y} {b.x},{b.y} {c.x},{c.y}")
+            parts.append("z")
+        fp.write(f'<path d="{"".join(parts)}" fill="black"/>')
+        fp.write("</svg>")
 
-# Configure Google Generative AI
-GOOGLE_API_KEY = 'AIzaSyCAzjRDfy9rbkP4v8CWCi9_vWaypLPY15c'
-genai.configure(api_key=GOOGLE_API_KEY)
+@app.route('/')
+def index():
+    files = sorted(os.listdir(CAPTURED_FRAMES_FOLDER), key=lambda x: int(x.split('.')[0]))
+    return render_template('index.html', files=files)
 
-def extract_text_from_pdf(pdf_path):
-    text = ""
-    with pdfplumber.open(pdf_path) as pdf:
-        for page in pdf.pages:
-            text += page.extract_text()
-    return text
+@app.route('/upload', methods=['POST'])
+def upload():
+    data = request.json.get('image')
+    if not data:
+        return jsonify({'error': 'No image data'}), 400
+    image_data = base64.b64decode(data.split(',')[1])
+    files = os.listdir(CAPTURED_FRAMES_FOLDER)
+    next_number = len(files) + 1
+    filename = f"{next_number}.png"
+    file_path = os.path.join(CAPTURED_FRAMES_FOLDER, filename)
+    with open(file_path, 'wb') as f:
+        f.write(image_data)
+    return jsonify({'filename': filename})
 
-def handle_pdf(pdf_path, subject, model):
-    extracted_text = extract_text_from_pdf(pdf_path)
+@app.route('/process_images', methods=['POST'])
+def process_images():
+    try:
+        # Step 1: Enhance and dilate captured images
+        for filename in os.listdir(CAPTURED_FRAMES_FOLDER):
+            input_path = os.path.join(CAPTURED_FRAMES_FOLDER, filename)
+            processed_path = os.path.join(PROCESSED_FRAMES_FOLDER, filename)
+            enhance_contrast_brightness_dilate(input_path, processed_path)
+        
+        # Step 2: Convert processed images to SVG
+        for filename in os.listdir(PROCESSED_FRAMES_FOLDER):
+            input_path = os.path.join(PROCESSED_FRAMES_FOLDER, filename)
+            char_index = int(os.path.splitext(filename)[0]) - 1
+            characters = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+            if char_index < 0 or char_index >= len(characters):
+                continue
+            char = characters[char_index]
+            svg_path = os.path.join(SVG_FOLDER, f"{char}.svg")
+            file_to_svg(input_path, svg_path)
+        
+        # Step 3: Generate TTF font from SVGs
+        font = fontforge.font()
+        for filename in os.listdir(SVG_FOLDER):
+            char = os.path.splitext(filename)[0]
+            if len(char) != 1:
+                print(f"Skipping invalid character file: {filename}")
+                continue
+            glyph = font.createChar(ord(char))
+            svg_path = os.path.join(SVG_FOLDER, filename)
+            glyph.importOutlines(svg_path)
+        font.generate(TTF_PATH)
 
-    response = model.generate_content(
-        [f'''I have extracted text from a pdf, which is my {subject} assignment. Please answer these questions:{extracted_text}.
-         NOTE: 1. Start every answer with Ans1-, next with Ans2- and so on.
-               2. Don't use any markdown, just give answer in normal text without any markdown symbols.
-               3. You can use a line break for next line.
-               4. Also write  the questions before answering them.'''],
-        safety_settings={
-            HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
-            HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
-            HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
-            HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE
-        }
-    )
-    
-    return response.text
+        return jsonify({'message': 'Processing complete. TTF file generated.'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
-# def continuous_requests():
-#     try:
-#         response = requests.get("https://test-assingnement-api.onrender.com/keep-alive")
-#         print(response.text)
-#     except Exception as e:
-#         print(f"Error occurred: {e}")
-#     time.sleep(10)
+@app.route('/download_ttf')
+def download_ttf():
+    try:
+        return send_file(TTF_PATH, as_attachment=True, download_name='myfont.ttf')
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
-# def restart_server():
-#     logger.info("Server is restarting...")
-#     try:
-#         # Command to run
-#         cmd_command = "uvicorn main:app --reload"
-#         response = requests.get("https://test-assingnement-api.onrender.com/keep-alive")
+@app.route('/cleanup', methods=['POST'])
+def cleanup():
+    try:
+        deleted_files = []
+        for folder in [CAPTURED_FRAMES_FOLDER, PROCESSED_FRAMES_FOLDER, SVG_FOLDER]:
+            files = os.listdir(folder)
+            for file in files:
+                file_path = os.path.join(folder, file)
+                if os.path.isfile(file_path):
+                    os.remove(file_path)
+                    deleted_files.append(file)
+        if os.path.isfile(TTF_PATH):
+            os.remove(TTF_PATH)
+            deleted_files.append(TTF_PATH)
+        return jsonify({'deleted_files': deleted_files}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
-#         # Run the command
-#         result = subprocess.run(cmd_command, shell=True, capture_output=True, text=True)
-
-#         # Print the result
-#         logger.info(result.stdout)
-#     except Exception as e:
-#         logger.error(f"Error occurred while restarting server: {e}")
-
-# @app.on_event("shutdown")
-# async def shutdown_event():
-#     restart_server()    
-#     response = requests.get("https://test-assingnement-api.onrender.com/keep-alive")
-#     logger.info(response.text)
-
-# logger.info("Starting the server...")
-    
-# @app.head("/")
-# async def head_root():
-#     continuous_requests()
-#     return JSONResponse(content={"message": "Continuous requests completed."})
-
-
-@app.get("/keep-alive")
-async def keep_alive():
-    return JSONResponse(content={"message": "Server is active"})
-
-@app.post("/process-file/")
-async def process_file(file: UploadFile = File(...), subject: str = Form(...)):
-
-    # Create a temporary directory
-    with tempfile.TemporaryDirectory() as tmpdirname:
-        # Save the uploaded file to the temporary directory
-        file_path = os.path.join(tmpdirname, file.filename)
-        with open(file_path, "wb") as f:
-            f.write(await file.read())
-
-        # Initialize the Generative AI model
-        model = genai.GenerativeModel(model_name="gemini-1.5-flash")
-
-        try:
-            # Determine file type and process accordingly
-            if file.filename.lower().endswith(".pdf"):
-                response = handle_pdf(file_path, subject, model)
-            elif file.filename.lower().endswith((".jpg", ".jpeg", ".png", ".docx", ".doc")):
-                response = "WE ARE UNDER DEVELOPMENT"
-            else:
-                raise ValueError("Unsupported file type. Please provide a PDF or image file.")
-        except Exception as e:
-            raise HTTPException(status_code=400, detail=str(e))
-    
-    
-    return JSONResponse(content={"response": response})
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)
+if __name__ == '__main__':
+    app.run(debug=True)
