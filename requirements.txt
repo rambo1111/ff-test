@@ -2,5 +2,5 @@ Flask
 numpy
 opencv-python
 Pillow
-potrace
+potracer
 gunicorn
