@@ -1,6 +1,6 @@
-fastapi
-uvicorn
-pdfplumber
-google-generativeai
+Flask
+numpy
+opencv-python
+Pillow
+potrace
 gunicorn
-requests
