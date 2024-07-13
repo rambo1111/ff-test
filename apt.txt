@@ -1,4 +1,0 @@
-python3-fontforge
-libfontforge-dev
-libspiro-dev
-libuninameslist-dev
