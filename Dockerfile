@@ -3,11 +3,11 @@ FROM python:3.8-slim
 
 # Install system dependencies
 RUN apt-get update && \
-    apt-get install -y python3-fontforge libfontforge-dev libspiro-dev libuninameslist-dev && \
+    apt-get install -y python3-fontforge libspiro-dev libuninameslist-dev && \
     rm -rf /var/lib/apt/lists/*
 
 # Install Python packages
-RUN pip install fastapi numpy opencv-python pillow potrace uvicorn
+RUN pip install fastapi numpy opencv-python pillow potracer uvicorn
 
 # Set the working directory
 WORKDIR /app
