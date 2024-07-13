@@ -1,150 +1,71 @@
 import os
-import base64
-import atexit
 import cv2
 import numpy as np
-from flask import Flask, render_template, request, jsonify, send_file
 from PIL import Image
-from potrace import Bitmap, POTRACE_TURNPOLICY_MINORITY
+import potrace
 import fontforge
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import JSONResponse
 
-app = Flask(__name__)
-CAPTURED_FRAMES_FOLDER = 'captured_frames'
-PROCESSED_FRAMES_FOLDER = 'processed_frames'
-SVG_FOLDER = 'svgs'
-TTF_PATH = 'myfont.ttf'
-os.makedirs(CAPTURED_FRAMES_FOLDER, exist_ok=True)
-os.makedirs(PROCESSED_FRAMES_FOLDER, exist_ok=True)
-os.makedirs(SVG_FOLDER, exist_ok=True)
+app = FastAPI()
 
-def cleanup_on_exit():
-    try:
-        deleted_files = []
-        for folder in [CAPTURED_FRAMES_FOLDER, PROCESSED_FRAMES_FOLDER, SVG_FOLDER]:
-            files = os.listdir(folder)
-            for file in files:
-                file_path = os.path.join(folder, file)
-                if os.path.isfile(file_path):
-                    os.remove(file_path)
-                    deleted_files.append(file)
-        if os.path.isfile(TTF_PATH):
-            os.remove(TTF_PATH)
-            deleted_files.append(TTF_PATH)
-        print(f"Cleanup completed. Deleted files: {deleted_files}")
-    except Exception as e:
-        print(f"Error during cleanup: {str(e)}")
-
-atexit.register(cleanup_on_exit)
-
-def enhance_contrast_brightness_dilate(image_path, output_path, kernel_size=(3, 3)):
+def enhance_contrast_brightness_erode(image_path):
     img = cv2.imread(image_path)
     alpha = 1.5
     beta = 10
     adjusted = np.clip(alpha * img + beta, 0, 255).astype(np.uint8)
-    kernel = np.ones(kernel_size, dtype=np.uint8)
-    dilated = cv2.erode(adjusted, kernel, iterations=1)
-    cv2.imwrite(output_path, dilated)
+    kernel = np.ones((3, 3), dtype=np.uint8)
+    eroded = cv2.erode(adjusted, kernel, iterations=1)
+    return eroded
 
-def file_to_svg(input_path, output_path):
-    image = Image.open(input_path).convert('L')
-    bm = Bitmap(image, blacklevel=0.5)
-    plist = bm.trace(turdsize=2, turnpolicy=POTRACE_TURNPOLICY_MINORITY, alphamax=1, opticurve=False, opttolerance=0.2)
-    with open(output_path, "w") as fp:
-        fp.write(f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {image.width} {image.height}">')
-        parts = []
-        for curve in plist:
-            fs = curve.start_point
-            parts.append(f"M{fs.x},{fs.y}")
-            for segment in curve.segments:
+def convert_to_svg(image, output_path):
+    image = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2GRAY))
+    bitmap = potrace.Bitmap(np.array(image))
+    path = bitmap.trace()
+    with open(output_path, "w") as f:
+        f.write('<svg xmlns="http://www.w3.org/2000/svg">\n')
+        f.write('<path d="')
+        for curve in path:
+            f.write(f'M{curve.start_point.x},{curve.start_point.y} ')
+            for segment in curve:
                 if segment.is_corner:
-                    a, b = segment.c, segment.end_point
-                    parts.append(f"L{a.x},{a.y}L{b.x},{b.y}")
+                    f.write(f'L{segment.c.x},{segment.c.y} L{segment.end_point.x},{segment.end_point.y} ')
                 else:
-                    a, b, c = segment.c1, segment.c2, segment.end_point
-                    parts.append(f"C{a.x},{a.y} {b.x},{b.y} {c.x},{c.y}")
-            parts.append("z")
-        fp.write(f'<path d="{"".join(parts)}" fill="black"/>')
-        fp.write("</svg>")
+                    f.write(f'C{segment.c1.x},{segment.c1.y} {segment.c2.x},{segment.c2.y} {segment.end_point.x},{segment.end_point.y} ')
+            f.write('Z ')
+        f.write('"/>\n</svg>')
 
-@app.route('/')
-def index():
-    files = sorted(os.listdir(CAPTURED_FRAMES_FOLDER), key=lambda x: int(x.split('.')[0]))
-    return render_template('index.html', files=files)
+def create_ttf_from_svgs(svg_files, output_font_path):
+    font = fontforge.font()
+    for char, svg_file in svg_files.items():
+        glyph = font.createChar(ord(char))
+        glyph.importOutlines(svg_file)
+    font.generate(output_font_path)
 
-@app.route('/upload', methods=['POST'])
-def upload():
-    data = request.json.get('image')
-    if not data:
-        return jsonify({'error': 'No image data'}), 400
-    image_data = base64.b64decode(data.split(',')[1])
-    files = os.listdir(CAPTURED_FRAMES_FOLDER)
-    next_number = len(files) + 1
-    filename = f"{next_number}.png"
-    file_path = os.path.join(CAPTURED_FRAMES_FOLDER, filename)
-    with open(file_path, 'wb') as f:
-        f.write(image_data)
-    return jsonify({'filename': filename})
-
-@app.route('/process_images', methods=['POST'])
-def process_images():
-    try:
-        # Step 1: Enhance and dilate captured images
-        for filename in os.listdir(CAPTURED_FRAMES_FOLDER):
-            input_path = os.path.join(CAPTURED_FRAMES_FOLDER, filename)
-            processed_path = os.path.join(PROCESSED_FRAMES_FOLDER, filename)
-            enhance_contrast_brightness_dilate(input_path, processed_path)
-        
-        # Step 2: Convert processed images to SVG
-        for filename in os.listdir(PROCESSED_FRAMES_FOLDER):
-            input_path = os.path.join(PROCESSED_FRAMES_FOLDER, filename)
-            char_index = int(os.path.splitext(filename)[0]) - 1
-            characters = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
-            if char_index < 0 or char_index >= len(characters):
+@app.post("/generate-font")
+def generate_font():
+    input_directory = 'input_images'
+    output_font_path = 'myfont.ttf'
+    svg_files = {}
+    for filename in os.listdir(input_directory):
+        if filename.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp')):
+            input_path = os.path.join(input_directory, filename)
+            eroded_image = enhance_contrast_brightness_erode(input_path)
+            char_index = int(os.path.splitext(filename)[0])
+            if 1 <= char_index <= 26:
+                char = chr(char_index + 64)
+            elif 27 <= char_index <= 52:
+                char = chr(char_index + 70)
+            elif 53 <= char_index <= 62:
+                char = chr(char_index - 5)
+            else:
                 continue
-            char = characters[char_index]
-            svg_path = os.path.join(SVG_FOLDER, f"{char}.svg")
-            file_to_svg(input_path, svg_path)
-        
-        # Step 3: Generate TTF font from SVGs
-        font = fontforge.font()
-        for filename in os.listdir(SVG_FOLDER):
-            char = os.path.splitext(filename)[0]
-            if len(char) != 1:
-                print(f"Skipping invalid character file: {filename}")
-                continue
-            glyph = font.createChar(ord(char))
-            svg_path = os.path.join(SVG_FOLDER, filename)
-            glyph.importOutlines(svg_path)
-        font.generate(TTF_PATH)
+            svg_path = f"{os.path.splitext(input_path)[0]}.svg"
+            convert_to_svg(eroded_image, svg_path)
+            svg_files[char] = svg_path
+    create_ttf_from_svgs(svg_files, output_font_path)
+    return JSONResponse(content={"message": "Font generation complete.", "font_path": output_font_path})
 
-        return jsonify({'message': 'Processing complete. TTF file generated.'})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/download_ttf')
-def download_ttf():
-    try:
-        return send_file(TTF_PATH, as_attachment=True, download_name='myfont.ttf')
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/cleanup', methods=['POST'])
-def cleanup():
-    try:
-        deleted_files = []
-        for folder in [CAPTURED_FRAMES_FOLDER, PROCESSED_FRAMES_FOLDER, SVG_FOLDER]:
-            files = os.listdir(folder)
-            for file in files:
-                file_path = os.path.join(folder, file)
-                if os.path.isfile(file_path):
-                    os.remove(file_path)
-                    deleted_files.append(file)
-        if os.path.isfile(TTF_PATH):
-            os.remove(TTF_PATH)
-            deleted_files.append(TTF_PATH)
-        return jsonify({'deleted_files': deleted_files}), 200
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
