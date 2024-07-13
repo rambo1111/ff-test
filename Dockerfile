@@ -3,7 +3,8 @@ FROM python:3.8-slim
 
 # Install system dependencies
 RUN apt-get update && \
-    apt-get install -y python3-fontforge libspiro-dev libuninameslist-dev && \
+    apt-get install -y python3-fontforge libspiro-dev libuninameslist-dev \
+    libgl1-mesa-glx libglib2.0-0 && \
     rm -rf /var/lib/apt/lists/*
 
 # Install Python packages
