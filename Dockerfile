@@ -18,4 +18,4 @@ WORKDIR /app
 COPY . /app
 
 # Command to run the FastAPI application
-CMD ["python3", "test1.py"]
+CMD ["python3", "app.py"]
