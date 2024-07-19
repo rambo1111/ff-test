@@ -1,6 +1,7 @@
 from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.responses import FileResponse
 import os
+from fastapi.middleware.cors import CORSMiddleware
 import cv2
 import logging
 import numpy as np
@@ -10,6 +11,15 @@ import fontforge
 from typing import List
 
 app = FastAPI()
+
+# Configure CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["POST"],
+    allow_headers=["*"],
+)
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
