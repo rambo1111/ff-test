@@ -1,7 +1,6 @@
 from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.responses import FileResponse
 import os
-from fastapi.middleware.cors import CORSMiddleware
 import cv2
 import logging
 import numpy as np
@@ -9,17 +8,9 @@ from PIL import Image
 from potrace import Bitmap, POTRACE_TURNPOLICY_MINORITY
 import fontforge
 from typing import List
+import shutil
 
 app = FastAPI()
-
-# Configure CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["POST"],
-    allow_headers=["*"],
-)
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -57,6 +48,13 @@ def file_to_svg(input_path, output_path):
             parts.append("z")
         fp.write(f'<path stroke="none" fill="black" fill-rule="evenodd" d="{"".join(parts)}"/>')
         fp.write("</svg>")
+
+def cleanup(directory):
+    try:
+        shutil.rmtree(directory)
+        logging.info(f"Successfully cleaned up {directory}")
+    except Exception as e:
+        logging.error(f"Error cleaning up {directory}: {e}")
 
 def generate_ttf(svg_directory, ttf_path, spacing):
     font = fontforge.font()
@@ -112,43 +110,61 @@ async def upload_images(files: List[UploadFile] = File(...), spacing: int = Form
     os.makedirs(eroded_folder, exist_ok=True)
     os.makedirs(svg_folder, exist_ok=True)
 
-    # Save uploaded images
-    for file in files:
-        file_path = os.path.join(input_folder, file.filename)
-        with open(file_path, "wb") as f:
-            f.write(await file.read())
-
-    # Erode images and check results
-    for filename in os.listdir(input_folder):
-        if filename.endswith(('.png', '.jpg', '.jpeg')):
-            input_path = os.path.join(input_folder, filename)
-            output_path = os.path.join(eroded_folder, filename)
-            enhance_contrast_brightness_erode(input_path, output_path)
-
-    # Convert to SVG
-    for filename in os.listdir(eroded_folder):
-        if filename.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp')):
-            input_path = os.path.join(eroded_folder, filename)
-            output_path = os.path.join(svg_folder, f"{os.path.splitext(filename)[0]}.svg")
-            try:
-                file_to_svg(input_path, output_path)
-            except Exception as e:
-                logging.error(f"SVG generation failed for {filename}: {e}")
-                return {"detail": f"SVG generation failed for {filename}: {e}"}, 500
-
-    # Generate TTF font
     try:
-        generate_ttf(svg_folder, ttf_path, spacing)
+        # Save uploaded images
+        for file in files:
+            file_path = os.path.join(input_folder, file.filename)
+            with open(file_path, "wb") as f:
+                f.write(await file.read())
+
+        # Erode images and check results
+        for filename in os.listdir(input_folder):
+            if filename.endswith(('.png', '.jpg', '.jpeg')):
+                input_path = os.path.join(input_folder, filename)
+                output_path = os.path.join(eroded_folder, filename)
+                enhance_contrast_brightness_erode(input_path, output_path)
+
+        # Convert to SVG
+        for filename in os.listdir(eroded_folder):
+            if filename.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp')):
+                input_path = os.path.join(eroded_folder, filename)
+                output_path = os.path.join(svg_folder, f"{os.path.splitext(filename)[0]}.svg")
+                try:
+                    file_to_svg(input_path, output_path)
+                except Exception as e:
+                    logging.error(f"SVG generation failed for {filename}: {e}")
+                    return {"detail": f"SVG generation failed for {filename}: {e}"}, 500
+
+        # Generate TTF font
+        try:
+            generate_ttf(svg_folder, ttf_path, spacing)
+        except Exception as e:
+            logging.error(f"Font generation failed: {e}")
+            return {"detail": f"Font generation failed: {e}"}, 500
+
+        # Check if the TTF file was created
+        if not os.path.exists(ttf_path):
+            logging.error("Font file was not created.")
+            return {"detail": "Font file was not created."}, 500
+
+        # Create a copy of the font file before cleanup
+        safe_ttf_path = os.path.join(tmpdirname, "safe_myfont.ttf")
+        shutil.copy2(ttf_path, safe_ttf_path)
+
+        return FileResponse(safe_ttf_path, media_type='font/ttf', filename='myfont.ttf')
+
     except Exception as e:
-        logging.error(f"Font generation failed: {e}")
-        return {"detail": f"Font generation failed: {e}"}, 500
+        logging.error(f"Unexpected error: {e}")
+        return {"detail": f"An unexpected error occurred: {e}"}, 500
 
-    # Check if the TTF file was created
-    if not os.path.exists(ttf_path):
-        logging.error("Font file was not created.")
-        return {"detail": "Font file was not created."}, 500
-
-    return FileResponse(ttf_path, media_type='font/ttf', filename='myfont.ttf')
+    finally:
+        # Cleanup
+        cleanup(input_folder)
+        cleanup(eroded_folder)
+        cleanup(svg_folder)
+        if os.path.exists(ttf_path):
+            os.remove(ttf_path)
+        logging.info("Cleanup completed")
     
 if __name__ == "__main__":
     import uvicorn
